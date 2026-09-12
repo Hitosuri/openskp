@@ -391,7 +391,11 @@ TEST(Parser, StreamingDefinitionsPreservesGeometryAndHierarchy) {
       total_faces += prim.indices.size() / 3;
     }
   }
-  EXPECT_EQ(total_faces, 16949u);
+  // 16949 before the triangulator switched to mapbox earcut: the previous
+  // hand-written ear clipper silently dropped whatever it could not cut on
+  // faces with two or more holes, losing 4764 sq in (12.9%) of this
+  // fixture's surface across 88 faces. Now every face is fully covered.
+  EXPECT_EQ(total_faces, 18788u);
 }
 
 }  // namespace

@@ -102,6 +102,25 @@ if(NOT tinygltf_POPULATED)
   FetchContent_Populate(tinygltf)
 endif()
 
+# Header-only, robust polygon triangulation. The hand-written ear clipper
+# this replaced bridged each hole into the outer ring with no visibility
+# test, so from the second hole onward the bridge could cross a previous
+# one and the clipper silently discarded the rest of the face - a face
+# with 2 holes lost about half its triangles, 4 holes lost 86%. Same
+# algorithm family as the `mapbox_earcut` package Python's triangulator
+# path uses. Header-only: no sources to compile.
+FetchContent_Declare(
+  earcut
+  GIT_REPOSITORY https://github.com/mapbox/earcut.hpp.git
+  GIT_TAG v2.2.4
+  GIT_SHALLOW TRUE
+)
+FetchContent_GetProperties(earcut)
+
+if(NOT earcut_POPULATED)
+  FetchContent_Populate(earcut)
+endif()
+
 # Header-only C++ runtime for reading/writing the vendored ThatOpen
 # Fragments (.frag) FlatBuffers schema (include/openskp/_fragments_fb/
 # index.fbs, generated via `flatc --cpp`) - same role Python's
@@ -176,6 +195,7 @@ target_include_directories(
     "${miniz_SOURCE_DIR}"
     "${tinygltf_SOURCE_DIR}"
     "${flatbuffers_SOURCE_DIR}/include"
+    "${earcut_SOURCE_DIR}/include"
 )
 
 set_target_properties(

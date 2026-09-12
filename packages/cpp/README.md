@@ -68,16 +68,16 @@ CMake fetches these pinned dependencies:
 | --- | --- | --- | --- |
 | [miniz](https://github.com/richgel999/miniz) | 3.1.2 (`77d0dce8627735138c51770d1799a1ef48f2117d`) | Reading modern SKP ZIP containers | Always |
 | [TinyGLTF](https://github.com/syoyo/tinygltf) | 2.9.7 (`488a70a3df62a4df1a736e9e56fb8836580c4888`) | Writing binary glTF 2.0 assets | Always |
+| [earcut.hpp](https://github.com/mapbox/earcut.hpp) | 2.2.4 (`v2.2.4`) | Polygon triangulation, including faces with holes | Always |
 | [GoogleTest](https://github.com/google/googletest) | 1.17.0 (`52eb8108c5bdec04579160ae17225d66034bd723`) | C++ test suite | `OPENSKP_BUILD_TESTS=ON` |
 
-miniz and TinyGLTF are compiled privately into OpenSKP, and GoogleTest is used
-only by the test executable. None is a transitive dependency for installed consumers.
-The triangulation implementation is included in this source tree and does not
-require a separate library.
+miniz and TinyGLTF are compiled privately into OpenSKP, earcut.hpp is
+header-only, and GoogleTest is used only by the test executable. None is a
+transitive dependency for installed consumers.
 
 Standard FetchContent source overrides and offline workflows are supported,
 including `FETCHCONTENT_SOURCE_DIR_MINIZ` and
-`FETCHCONTENT_SOURCE_DIR_TINYGLTF`, and
+`FETCHCONTENT_SOURCE_DIR_TINYGLTF`, `FETCHCONTENT_SOURCE_DIR_EARCUT`, and
 `FETCHCONTENT_SOURCE_DIR_GOOGLETEST`.
 
 clang-format is an optional developer dependency. Version 18 is the canonical
