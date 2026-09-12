@@ -176,6 +176,50 @@ TEST(InstancedGlb, ManyDistinctMeshResourcesStayNearLinearNotQuadratic) {
   EXPECT_LT(elapsed_ms, 5000.0) << "took " << elapsed_ms << "ms - looks quadratic again";
 }
 
+TEST(InstancedGlb, IdenticalAttributeDataSharesOneAccessor) {
+  // Splitting a definition by material re-emits the same positions,
+  // normals and UVs once per material. trimesh hashes identical arrays for
+  // the Python exporter, so before this the C++ GLB carried 9.1 MB more
+  // than Python's on the same 197 MB model.
+  InstancedScene scene;
+  scene.gltf_materials = {{}, {}};
+  auto resource = make_box_resource("mesh_0");
+  auto second = resource.primitives[0];
+  second.material_index = 1;
+  resource.primitives.push_back(second);
+  scene.mesh_resources = {resource};
+  InstancedNode root;
+  root.name = "ROOT";
+  root.matrix = kIdentity;
+  InstancedNode leaf;
+  leaf.name = "Box";
+  leaf.matrix = kIdentity;
+  leaf.mesh_resource_id = "mesh_0";
+  root.children = {leaf};
+  scene.scene_hierarchy = std::move(root);
+
+  const auto model = load_glb(to_instanced_glb(scene));
+  ASSERT_EQ(model.meshes.size(), 1u);
+  ASSERT_EQ(model.meshes[0].primitives.size(), 2u);
+  const auto& first = model.meshes[0].primitives[0];
+  const auto& other = model.meshes[0].primitives[1];
+  EXPECT_EQ(first.attributes.at("POSITION"), other.attributes.at("POSITION"));
+  EXPECT_EQ(first.attributes.at("NORMAL"), other.attributes.at("NORMAL"));
+  EXPECT_EQ(first.attributes.at("TEXCOORD_0"), other.attributes.at("TEXCOORD_0"));
+  EXPECT_EQ(first.indices, other.indices);
+  EXPECT_EQ(model.accessors.size(), 4u);
+  EXPECT_EQ(model.bufferViews.size(), 4u);
+
+  const auto& position = model.accessors[static_cast<std::size_t>(first.attributes.at("POSITION"))];
+  EXPECT_FALSE(position.minValues.empty()) << "POSITION accessor lost its bounds";
+
+  const auto& prim = resource.primitives[0];
+  EXPECT_EQ(model.buffers[0].data.size(),
+            (prim.positions.size() + prim.normals.size() + prim.uvs.size() + prim.indices.size()) *
+                4)
+      << "duplicate bytes were left in the buffer, only unreferenced";
+}
+
 TEST(InstancedGlb, ExportInstancedGlbFileRoundTrips) {
   const auto scene = SkpFile::open(test::fixture("capilla_quiroz_v17.skp")).build_instanced_scene();
   const auto output =

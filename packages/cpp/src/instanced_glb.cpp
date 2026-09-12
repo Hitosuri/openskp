@@ -91,6 +91,49 @@ int add_accessor(gltf::Model& model, int view, std::size_t count, int component_
   return static_cast<int>(model.accessors.size() - 1);
 }
 
+std::uint64_t hash_bytes(const std::uint8_t* data, std::size_t length) {
+  std::uint64_t hash = 1469598103934665603ull;
+  for (std::size_t i = 0; i < length; ++i) {
+    hash ^= data[i];
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+using BlobCache = std::map<std::uint64_t, std::vector<int>>;
+
+struct AddedAttribute {
+  int accessor;
+  bool created;
+};
+
+template <typename T, typename Append>
+AddedAttribute add_attribute(gltf::Model& model, ByteBuffer& binary, BlobCache& cache,
+                             const std::vector<T>& values, Append append, std::size_t count,
+                             int component_type, int type, int target) {
+  // Hashing the emitted bytes rather than `values` keeps this independent
+  // of host endianness: append_u32 writes little-endian explicitly.
+  const auto unpadded = binary.size();
+  const auto offset = append_values(binary, values, append);
+  const auto length = values.size() * sizeof(T);
+  auto& bucket = cache[hash_bytes(binary.data() + offset, length)];
+
+  for (const int candidate : bucket) {
+    const auto& accessor = model.accessors[static_cast<std::size_t>(candidate)];
+    if (accessor.componentType != component_type || accessor.type != type) continue;
+    const auto& view = model.bufferViews[static_cast<std::size_t>(accessor.bufferView)];
+    if (view.byteLength != length || view.target != target) continue;
+    if (std::memcmp(binary.data() + view.byteOffset, binary.data() + offset, length) != 0) continue;
+    binary.resize(unpadded);
+    return {candidate, false};
+  }
+
+  const auto view = add_view(model, offset, length, target);
+  const auto accessor = add_accessor(model, view, count, component_type, type);
+  bucket.push_back(accessor);
+  return {accessor, true};
+}
+
 void validate_scene(const InstancedScene& scene) {
   constexpr auto kMaxModelEntries = static_cast<std::size_t>(std::numeric_limits<int>::max());
   if (scene.gltf_materials.size() > kMaxModelEntries) {
@@ -252,60 +295,51 @@ gltf::Model make_model(const InstancedScene& scene, bool embed_textures) {
   }
 
   std::map<std::string, int> mesh_index_by_id;
+  BlobCache blobs;
 
   for (const auto& resource : scene.mesh_resources) {
     gltf::Mesh mesh;
     mesh.name = resource.definition_name.empty() ? resource.id : resource.definition_name;
 
     for (const auto& source : resource.primitives) {
-      const auto position_offset =
-          append_values(binary, source.positions,
-                        [](ByteBuffer& bytes, float value) { append_f32(bytes, value); });
-      const auto position_view = add_view(model, position_offset, source.positions.size() * 4,
-                                          TINYGLTF_TARGET_ARRAY_BUFFER);
-      const auto position_accessor =
-          add_accessor(model, position_view, source.positions.size() / 3,
-                       TINYGLTF_COMPONENT_TYPE_FLOAT, TINYGLTF_TYPE_VEC3);
-      auto& accessor = model.accessors[static_cast<std::size_t>(position_accessor)];
-      accessor.minValues = {source.positions[0], source.positions[1], source.positions[2]};
-      accessor.maxValues = accessor.minValues;
-      for (std::size_t index = 3; index < source.positions.size(); index += 3) {
-        for (std::size_t axis = 0; axis < 3; ++axis) {
-          accessor.minValues[axis] = std::min(accessor.minValues[axis],
-                                              static_cast<double>(source.positions[index + axis]));
-          accessor.maxValues[axis] = std::max(accessor.maxValues[axis],
-                                              static_cast<double>(source.positions[index + axis]));
+      const auto append_float = [](ByteBuffer& bytes, float value) { append_f32(bytes, value); };
+
+      const auto position = add_attribute(
+          model, binary, blobs, source.positions, append_float, source.positions.size() / 3,
+          TINYGLTF_COMPONENT_TYPE_FLOAT, TINYGLTF_TYPE_VEC3, TINYGLTF_TARGET_ARRAY_BUFFER);
+      if (position.created) {
+        auto& accessor = model.accessors[static_cast<std::size_t>(position.accessor)];
+        accessor.minValues = {source.positions[0], source.positions[1], source.positions[2]};
+        accessor.maxValues = accessor.minValues;
+        for (std::size_t index = 3; index < source.positions.size(); index += 3) {
+          for (std::size_t axis = 0; axis < 3; ++axis) {
+            accessor.minValues[axis] = std::min(
+                accessor.minValues[axis], static_cast<double>(source.positions[index + axis]));
+            accessor.maxValues[axis] = std::max(
+                accessor.maxValues[axis], static_cast<double>(source.positions[index + axis]));
+          }
         }
       }
 
-      const auto normal_offset = append_values(
-          binary, source.normals, [](ByteBuffer& bytes, float value) { append_f32(bytes, value); });
-      const auto normal_view =
-          add_view(model, normal_offset, source.normals.size() * 4, TINYGLTF_TARGET_ARRAY_BUFFER);
-      const auto normal_accessor = add_accessor(model, normal_view, source.normals.size() / 3,
-                                                TINYGLTF_COMPONENT_TYPE_FLOAT, TINYGLTF_TYPE_VEC3);
+      const auto normal = add_attribute(
+          model, binary, blobs, source.normals, append_float, source.normals.size() / 3,
+          TINYGLTF_COMPONENT_TYPE_FLOAT, TINYGLTF_TYPE_VEC3, TINYGLTF_TARGET_ARRAY_BUFFER);
 
-      const auto uv_offset = append_values(
-          binary, source.uvs, [](ByteBuffer& bytes, float value) { append_f32(bytes, value); });
-      const auto uv_view =
-          add_view(model, uv_offset, source.uvs.size() * 4, TINYGLTF_TARGET_ARRAY_BUFFER);
-      const auto uv_accessor = add_accessor(model, uv_view, source.uvs.size() / 2,
-                                            TINYGLTF_COMPONENT_TYPE_FLOAT, TINYGLTF_TYPE_VEC2);
+      const auto uv = add_attribute(model, binary, blobs, source.uvs, append_float,
+                                    source.uvs.size() / 2, TINYGLTF_COMPONENT_TYPE_FLOAT,
+                                    TINYGLTF_TYPE_VEC2, TINYGLTF_TARGET_ARRAY_BUFFER);
 
-      const auto index_offset =
-          append_values(binary, source.indices,
-                        [](ByteBuffer& bytes, std::uint32_t value) { append_u32(bytes, value); });
-      const auto index_view = add_view(model, index_offset, source.indices.size() * 4,
-                                       TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);
-      const auto index_accessor =
-          add_accessor(model, index_view, source.indices.size(),
-                       TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT, TINYGLTF_TYPE_SCALAR);
+      const auto indices = add_attribute(
+          model, binary, blobs, source.indices,
+          [](ByteBuffer& bytes, std::uint32_t value) { append_u32(bytes, value); },
+          source.indices.size(), TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT, TINYGLTF_TYPE_SCALAR,
+          TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);
 
       gltf::Primitive primitive;
-      primitive.attributes["POSITION"] = position_accessor;
-      primitive.attributes["NORMAL"] = normal_accessor;
-      primitive.attributes["TEXCOORD_0"] = uv_accessor;
-      primitive.indices = index_accessor;
+      primitive.attributes["POSITION"] = position.accessor;
+      primitive.attributes["NORMAL"] = normal.accessor;
+      primitive.attributes["TEXCOORD_0"] = uv.accessor;
+      primitive.indices = indices.accessor;
       primitive.material = static_cast<int>(source.material_index);
       primitive.mode = TINYGLTF_MODE_TRIANGLES;
       mesh.primitives.push_back(std::move(primitive));
