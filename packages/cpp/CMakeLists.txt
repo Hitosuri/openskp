@@ -342,6 +342,9 @@ if(OPENSKP_BUILD_EXAMPLES)
   add_executable(openskp_export_glb examples/export_glb.cpp)
   target_link_libraries(openskp_export_glb PRIVATE OpenSkp::OpenSkp)
 
+  add_executable(openskp_export_instanced_glb examples/export_instanced_glb.cpp)
+  target_link_libraries(openskp_export_instanced_glb PRIVATE OpenSkp::OpenSkp)
+
   add_executable(openskp_bench examples/bench.cpp)
   target_link_libraries(openskp_bench PRIVATE OpenSkp::OpenSkp)
 
