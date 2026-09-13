@@ -12,8 +12,20 @@ int main(int argc, char* argv[]) {
   }
 
   try {
+    openskp::ParseOptions options;
+    options.progress = [](const openskp::ParseProgress& p) {
+      std::cerr << "progress {\"stage\":\"" << openskp::stage_name(p.stage)
+                << "\",\"current\":" << p.current << ",\"total\":";
+      // build_scene reports total == current: the instance count isn't known up front.
+      if (p.stage == openskp::ParseStage::build_scene)
+        std::cerr << "null";
+      else
+        std::cerr << p.total;
+      std::cerr << '}' << std::endl;
+    };
+
     auto t0 = std::chrono::steady_clock::now();
-    auto scene = openskp::SkpFile::open(argv[1]).build_instanced_scene();
+    auto scene = openskp::SkpFile::open(argv[1]).build_instanced_scene(options);
     auto t1 = std::chrono::steady_clock::now();
     openskp::export_instanced_glb(scene, argv[2]);
     auto t2 = std::chrono::steady_clock::now();
